@@ -1,0 +1,47 @@
+# Builds the site on every push to main and publishes ONLY the built files
+# (contents of dist/, including .htaccess) to the `hostinger` branch.
+# Hostinger's Git deployment pulls that branch straight into public_html.
+name: Build for Hostinger
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hostinger-deploy
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          # Optional: set these under Settings > Secrets and variables > Actions > Variables
+          VITE_SITE_URL: ${{ vars.VITE_SITE_URL }}
+          VITE_ENQUIRY_ENDPOINT: ${{ vars.VITE_ENQUIRY_ENDPOINT }}
+
+      - name: Publish dist/ to the hostinger branch
+        run: |
+          cd dist
+          git init -q -b hostinger
+          git config user.name "itsriteshrajcoder-044"
+          git config user.email "itsriteshraj044@gmail.com"
+          git add -A
+          git commit -q -m "Deploy build of ${GITHUB_SHA::7}"
+          git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" hostinger
