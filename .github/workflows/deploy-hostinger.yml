@@ -1,6 +1,6 @@
 # On every push to main:
 #  1. builds the site
-#  2. uploads dist/ (including .htaccess) to Hostinger over FTP, if the FTP secrets are set
+#  2. uploads dist/ (including .htaccess) to Hostinger with lftp, if the FTP secrets are set
 #  3. also publishes dist/ to the `hostinger` branch (for hPanel's Git deployment, if you prefer that)
 #
 # FTP secrets (Settings > Secrets and variables > Actions > Secrets):
@@ -47,16 +47,30 @@ jobs:
 
       - name: Upload to Hostinger (FTP)
         if: env.HAS_FTP == 'true'
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ftp
-          port: 21
-          local-dir: ./dist/
-          server-dir: ${{ secrets.FTP_SERVER_DIR || 'public_html/' }}
-          # Only changed files are uploaded; files removed from the build are removed from the server.
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          LFTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_DIR: ${{ secrets.FTP_SERVER_DIR || 'public_html/' }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp > /dev/null
+          DIR="${FTP_DIR%/}"
+          upload() {
+            # $1 = "true" to try FTPS (encrypted), "false" for plain FTP
+            lftp <<LFTP
+          set ftp:ssl-allow $1
+          set ssl:verify-certificate no
+          set ftp:passive-mode true
+          set ftp:prefer-epsv false
+          set net:timeout 30
+          set net:max-retries 4
+          set net:reconnect-interval-base 5
+          open --env-password -u "$FTP_USERNAME" "$FTP_SERVER"
+          mirror --reverse --only-newer --parallel=2 --verbose --exclude-glob .git* --exclude ^assets/ dist/ "$DIR/" && mirror --reverse --delete --parallel=2 --verbose dist/assets/ "$DIR/assets/"
+          LFTP
+          }
+          # Uploads every file (including .htaccess); stale hashed files are removed only inside assets/.
+          upload true || { echo "::warning::FTPS upload failed, retrying over plain FTP"; upload false; }
 
       - name: FTP not configured
         if: env.HAS_FTP != 'true'
