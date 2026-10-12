@@ -41,6 +41,7 @@ Every `VITE_*` value ends up in the public JavaScript bundle. **Never put API ke
 - **Netlify:** `public/_redirects` is already included.
 - **Vercel:** `vercel.json` is already included.
 - **Apache / cPanel / Hostinger:** `public/.htaccess` is included and copied into `dist/`. It handles route fallback, MIME types, compression and caching. Upload the **contents** of `dist/` (including the hidden `.htaccess`) to `public_html/`.
+- **Hostinger via GitHub:** `.github/workflows/deploy-hostinger.yml` builds the site on every push to `main` and publishes only the built files to the **`hostinger`** branch. In hPanel open Websites → Manage → Advanced → **Git**, use repository `https://github.com/itsriteshraj044-coder/gurukul-sketch.git`, branch `hostinger`, and leave the install path empty (`public_html`). Click **Deploy**, then turn on **Auto Deployment** and paste its webhook URL into GitHub (Settings → Webhooks → Add webhook, content type `application/json`, "Just the push event").
 - **IIS / Windows hosting / Azure App Service:** `public/web.config` is included (needs the IIS URL Rewrite module).
 - **Nginx:** `try_files $uri /index.html;`
 
