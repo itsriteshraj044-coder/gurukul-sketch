@@ -7,7 +7,7 @@
 #   FTP_SERVER      e.g. ftp.yourdomain.com or the IP shown in hPanel > Files > FTP Accounts
 #   FTP_USERNAME    e.g. u123456789 or u123456789.yourdomain.com
 #   FTP_PASSWORD    the FTP account password
-#   FTP_SERVER_DIR  optional, folder to upload into, ending with "/" (default: public_html/)
+#   FTP_SERVER_DIR  optional, web root relative to the FTP login (auto-detected if not set)
 name: Build & deploy to Hostinger
 
 on:
@@ -51,26 +51,46 @@ jobs:
           FTP_SERVER: ${{ secrets.FTP_SERVER }}
           FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
           LFTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
-          FTP_DIR: ${{ secrets.FTP_SERVER_DIR || 'public_html/' }}
+          FTP_SERVER_DIR: ${{ secrets.FTP_SERVER_DIR }}
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq lftp > /dev/null
-          DIR="${FTP_DIR%/}"
-          upload() {
-            # $1 = "true" to try FTPS (encrypted), "false" for plain FTP
-            lftp <<LFTP
-          set ftp:ssl-allow $1
-          set ssl:verify-certificate no
-          set ftp:passive-mode true
-          set ftp:prefer-epsv false
-          set net:timeout 30
-          set net:max-retries 4
-          set net:reconnect-interval-base 5
-          open --env-password -u "$FTP_USERNAME" "$FTP_SERVER"
-          mirror --reverse --only-newer --parallel=2 --verbose --exclude-glob .git* --exclude ^assets/ dist/ "$DIR/" && mirror --reverse --delete --parallel=2 --verbose dist/assets/ "$DIR/assets/"
-          LFTP
+
+          SSL=true
+          ftp() {
+            lftp -c "set ftp:ssl-allow $SSL; set ssl:verify-certificate no; set ftp:passive-mode true; set ftp:prefer-epsv false; set net:timeout 30; set net:max-retries 4; set net:reconnect-interval-base 5; open --env-password -u \"$FTP_USERNAME\" \"$FTP_SERVER\"; $1"
           }
-          # Uploads every file (including .htaccess); stale hashed files are removed only inside assets/.
-          upload true || { echo "::warning::FTPS upload failed, retrying over plain FTP"; upload false; }
+          ftp "pwd" > /dev/null 2>&1 || { echo "::warning::FTPS not available, using plain FTP"; SSL=false; }
+
+          echo "FTP login folder:"; ftp "pwd"
+          ftp "cls -1a" | sed 's#/$##' > root.txt
+          echo "Contents:"; cat root.txt
+
+          # Work out where the website root (public_html) is.
+          if [ -n "$FTP_SERVER_DIR" ]; then
+            DIR="${FTP_SERVER_DIR%/}"
+            echo "Using FTP_SERVER_DIR = $DIR"
+          elif grep -qx "DO_NOT_UPLOAD_HERE" root.txt; then
+            DIR="public_html"   # logged in one level above the web root (Hostinger domain folder)
+            echo "Login is above public_html -> uploading into public_html/"
+          elif grep -qx "domains" root.txt; then
+            echo "::error::FTP login opens the account home folder. Set secret FTP_SERVER_DIR to domains/<your-domain>/public_html/"
+            exit 1
+          else
+            DIR="."             # logged in directly inside public_html
+            echo "Login is already inside public_html -> uploading into it directly"
+            # Clean up a nested public_html/ left by an earlier deploy, only if it is clearly our own build.
+            if grep -qx "public_html" root.txt; then
+              ftp "cls -1a public_html" | sed 's#/$##' > nested.txt || true
+              if grep -qx "index.html" nested.txt && grep -qx "assets" nested.txt && grep -qx "web.config" nested.txt; then
+                echo "Removing misplaced nested public_html/ from an earlier deploy"
+                ftp "rm -r public_html"
+              fi
+            fi
+          fi
+
+          # Upload everything (including .htaccess); stale hashed files are removed only inside assets/.
+          ftp "mirror --reverse --only-newer --parallel=2 --verbose --exclude-glob .git* --exclude ^assets/ dist/ $DIR/ && mirror --reverse --delete --parallel=2 --verbose dist/assets/ $DIR/assets/"
+          echo "Web root after deploy:"; ftp "cls -1a $DIR"
 
       - name: FTP not configured
         if: env.HAS_FTP != 'true'
