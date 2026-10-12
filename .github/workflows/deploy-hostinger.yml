@@ -86,7 +86,8 @@ jobs:
             echo "Login is already inside public_html -> uploading into it directly"
             # Clean up a nested public_html/ left by an earlier deploy, only if it is clearly our own build.
             if grep -qx "public_html" root.txt; then
-              ftp "cls -1a public_html" | sed 's#/$##' > nested.txt || true
+              ftp "cls -1a public_html/" | sed 's#/$##; s#.*/##' > nested.txt || true
+              echo "Nested public_html/ contains:"; cat nested.txt
               if grep -qx "index.html" nested.txt && grep -qx "assets" nested.txt && grep -qx "web.config" nested.txt; then
                 echo "Removing misplaced nested public_html/ from an earlier deploy"
                 ftp "rm -r public_html"
