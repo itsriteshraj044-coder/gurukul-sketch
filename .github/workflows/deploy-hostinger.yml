@@ -59,11 +59,17 @@ jobs:
           ftp() {
             lftp -c "set ftp:ssl-allow $SSL; set ssl:verify-certificate no; set ftp:passive-mode true; set ftp:prefer-epsv false; set net:timeout 30; set net:max-retries 4; set net:reconnect-interval-base 5; open --env-password -u \"$FTP_USERNAME\" \"$FTP_SERVER\"; $1"
           }
-          ftp "pwd" > /dev/null 2>&1 || { echo "::warning::FTPS not available, using plain FTP"; SSL=false; }
-
-          echo "FTP login folder:"; ftp "pwd"
-          ftp "cls -1a" | sed 's#/$##' > root.txt
-          echo "Contents:"; cat root.txt
+          # Connect and list the login folder (FTPS first, then plain FTP). Never guess if this fails.
+          if ! ftp "cls -1a" > root.txt 2> err.txt; then
+            echo "::warning::FTPS listing failed ($(tail -1 err.txt)), retrying with plain FTP"
+            SSL=false
+            if ! ftp "cls -1a" > root.txt 2> err.txt; then
+              echo "::error::Could not connect/list over FTP: $(tail -1 err.txt). Nothing was changed on the server."
+              exit 1
+            fi
+          fi
+          sed -i 's#/$##' root.txt
+          echo "Files in the FTP login folder:"; cat root.txt
 
           # Work out where the website root (public_html) is.
           if [ -n "$FTP_SERVER_DIR" ]; then
