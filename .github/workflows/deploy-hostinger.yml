@@ -1,7 +1,14 @@
-# Builds the site on every push to main and publishes ONLY the built files
-# (contents of dist/, including .htaccess) to the `hostinger` branch.
-# Hostinger's Git deployment pulls that branch straight into public_html.
-name: Build for Hostinger
+# On every push to main:
+#  1. builds the site
+#  2. uploads dist/ (including .htaccess) to Hostinger over FTP, if the FTP secrets are set
+#  3. also publishes dist/ to the `hostinger` branch (for hPanel's Git deployment, if you prefer that)
+#
+# FTP secrets (Settings > Secrets and variables > Actions > Secrets):
+#   FTP_SERVER      e.g. ftp.yourdomain.com or the IP shown in hPanel > Files > FTP Accounts
+#   FTP_USERNAME    e.g. u123456789 or u123456789.yourdomain.com
+#   FTP_PASSWORD    the FTP account password
+#   FTP_SERVER_DIR  optional, folder to upload into, ending with "/" (default: public_html/)
+name: Build & deploy to Hostinger
 
 on:
   push:
@@ -18,6 +25,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      HAS_FTP: ${{ secrets.FTP_SERVER != '' && secrets.FTP_USERNAME != '' && secrets.FTP_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,6 +44,23 @@ jobs:
           # Optional: set these under Settings > Secrets and variables > Actions > Variables
           VITE_SITE_URL: ${{ vars.VITE_SITE_URL }}
           VITE_ENQUIRY_ENDPOINT: ${{ vars.VITE_ENQUIRY_ENDPOINT }}
+
+      - name: Upload to Hostinger (FTP)
+        if: env.HAS_FTP == 'true'
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftp
+          port: 21
+          local-dir: ./dist/
+          server-dir: ${{ secrets.FTP_SERVER_DIR || 'public_html/' }}
+          # Only changed files are uploaded; files removed from the build are removed from the server.
+
+      - name: FTP not configured
+        if: env.HAS_FTP != 'true'
+        run: echo "::notice::FTP secrets not set yet, so the upload was skipped. Add FTP_SERVER, FTP_USERNAME and FTP_PASSWORD under Settings > Secrets and variables > Actions."
 
       - name: Publish dist/ to the hostinger branch
         run: |
